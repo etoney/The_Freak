@@ -1,0 +1,105 @@
+name: Build The Freak
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfreetype6-dev libfontconfig1-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev libxrender-dev libxext-dev
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DFREAK_TESTS_ONLY=ON
+      - name: Build checks
+        run: cmake --build build --config Release --target TheFreakSnapshot -j4
+      - name: Run DSP + preset checks, render GUI
+        run: mkdir -p snapshots && ./build/TheFreakSnapshot_artefacts/Release/TheFreakSnapshot snapshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gui-snapshots
+          path: snapshots/*.png
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15-intel, windows-latest]   # Apple Silicon runner queues were timing out; the Intel runner still builds universal arm64 + x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          else
+            cmake -B build -DCMAKE_BUILD_TYPE=Release
+          fi
+      - name: Build
+        run: cmake --build build --config Release --target TheFreak_VST3 TheFreak_Standalone
+      - name: Build AU (macOS)
+        if: runner.os == 'macOS'
+        run: cmake --build build --config Release --target TheFreak_AU
+      - name: Check universal + ad-hoc sign (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -e
+          for b in build/*_artefacts/Release/VST3/*.vst3 build/*_artefacts/Release/AU/*.component build/*_artefacts/Release/Standalone/*.app; do
+            [ -e "$b" ] || continue
+            n=$(basename "$b"); n="${n%.*}"
+            bin="$b/Contents/MacOS/$n"
+            archs=$(lipo -archs "$bin"); minos=$(vtool -show-build "$bin" 2>/dev/null | awk '/minos/{print $2; exit}')
+            echo "$n: $archs (min macOS $minos)"
+            if [[ "$archs" != *arm64* || "$archs" != *x86_64* ]]; then echo "::error::$n is not universal ($archs)"; exit 1; fi
+            codesign --force --deep -s - "$b"
+          done
+      - name: Package release zip (same layout as the site downloads)
+        shell: bash
+        run: |
+          VER=$(sed -n 's/^project(FREAK VERSION \([0-9.]*\)).*/\1/p' CMakeLists.txt)
+          OS=$([ "$RUNNER_OS" = "macOS" ] && echo macOS || echo Windows)
+          ZIP="TheFreak-v${VER}-${OS}.zip"
+          R=build/TheFreak_artefacts/Release
+          mkdir -p pkg/TheFreak/VST3 pkg/TheFreak/Standalone
+          cp readme.txt controls.txt LICENSE.txt THIRD-PARTY-NOTICES.txt pkg/TheFreak/
+          cp -R "$R/VST3/The Freak.vst3" pkg/TheFreak/VST3/
+          if [ "$OS" = "macOS" ]; then
+            mkdir -p pkg/TheFreak/AU && cp -R "$R/AU/The Freak.component" pkg/TheFreak/AU/
+            cp -R "$R/Standalone/The Freak.app" pkg/TheFreak/Standalone/
+            (cd pkg && ditto -c -k --sequesterRsrc --keepParent TheFreak "../$ZIP")
+          else
+            cp "$R/Standalone/The Freak.exe" pkg/TheFreak/Standalone/
+            (cd pkg && 7z a -tzip -mx=9 "../$ZIP" TheFreak > /dev/null)   # 7z writes forward-slash paths
+          fi
+          ls -la "$ZIP"
+          BR="downloads-$(echo $OS | tr 'A-Z' 'a-z')"
+          mkdir -p /tmp/dl && cp "$ZIP" /tmp/dl/ && cd /tmp/dl && git init -q -b "$BR" && git add -A
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "$ZIP for ${GITHUB_SHA}"
+          for try in 1 2 3 4; do
+            git -c http.postBuffer=157286400 push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" "$BR" && break
+            [ "$try" = 4 ] && exit 1; echo "push failed, retrying in 20 s"; sleep 20
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TheFreak-${{ runner.os }}
+          path: |
+            readme.txt
+            controls.txt
+            LICENSE.txt
+            THIRD-PARTY-NOTICES.txt
+            build/TheFreak_artefacts/Release/VST3
+            build/TheFreak_artefacts/Release/AU
+            build/TheFreak_artefacts/Release/Standalone

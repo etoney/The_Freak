@@ -1,0 +1,95 @@
+===============================================================================
+  THE FREAK  //  DYNAMIC EQ  //  Castle Danger Music Company
+===============================================================================
+
+The Freak is an EQ whose bands move by themselves. Each of its six bands has a
+normal static GAIN, plus a DEPTH that lets it react when its own frequency range
+misbehaves:
+
+  - Negative DEPTH: the band CUTS when that range jumps more than THRESHOLD dB
+    above its normal level (boomy notes, harsh peaks, cymbal crashes).
+  - Positive DEPTH: the band LIFTS when that range sinks more than THRESHOLD dB
+    below its normal level (a mix that goes dull in quiet parts).
+
+"Normal" is the band's own average over the last few seconds, learned while the
+band has something in it. So a band set on a quiet verse still behaves in the
+loud chorus, and silence never makes it lift. Zero latency, stereo linked.
+
+Put it first on the master bus (The Freak > Chop Shop > Dominatrix > The Master),
+or on any track or bus.
+
+
+THE CURVE
+---------
+  Faint hill ............ the output spectrum
+  Grey line ............. the static EQ (GAIN only)
+  Bright line ........... the live EQ, including what the bands are doing now
+  Coloured area ......... how far the selected band can move (its DEPTH)
+  Tether under a node ... the band has moved from its resting spot
+
+  Drag a node ............ frequency (left/right) and gain (up/down)
+  Cmd-drag / Alt-drag .... DEPTH (up/down)
+  Scroll over a node ..... width (Q)
+  Double-click a node .... switch the band on or off
+  Dragging a band that's off switches it on.
+
+
+BANDS
+-----
+Click a row to select a band, double-click to switch it on or off. The little
+bar on the right shows the live move: left = cutting, right = lifting.
+
+
+BAND CONTROLS (selected band)
+-----------------------------
+  ON ............ band on/off
+  BELL / LOW SHELF / HIGH SHELF
+                  A low shelf moves everything below FREQ and listens to the
+                  lows; a high shelf moves everything above and listens to
+                  the highs.
+  LISTEN ........ hear only what this band is listening to, to find the
+                  problem. Turn it off before you bounce. (Never saved in a
+                  preset.)
+  FREQ .......... 20 Hz - 20 kHz
+  WIDTH (Q) ..... 0.3 - 8. Higher = narrower. For a shelf it sets the slope.
+  GAIN .......... -12 to +12 dB, always applied
+  DEPTH ......... -18 to +12 dB, the most the band may move on its own.
+                  0 = a plain static EQ band.
+  THRESHOLD ..... 0 - 18 dB: how far the range must stray from normal before
+                  the band moves. The cut is 3/4 of a dB for every dB over the
+                  threshold, up to DEPTH; the lift is 1/2 dB per dB under.
+
+The yellow line under the knobs is The Master's reason for the band, when The
+Master set it.
+
+
+GLOBAL
+------
+  AMOUNT ........ scales every band's DEPTH. 0% = static EQ only, 200% = double.
+  SPEED ......... how fast bands react and let go (slow ~30 ms / 400 ms,
+                  fast ~3 ms / 60 ms)
+  OUTPUT ........ -12 to +12 dB
+  IN / OUT ...... peak meters
+
+
+THE EYE
+-------
+It watches. The harder the bands work, the wider and redder it gets.
+
+
+WITH THE MASTER
+---------------
+The Freak talks to The Master over Castle Danger Link. When The Master analyses
+your mix it looks at how much each frequency range swings between the quiet and
+loud parts. At PRESCRIBE it sets The Freak's bands on the ranges that swing too
+much (or go missing), with a short reason for each, and turns off its own
+built-in tone EQ so the two don't fight. LINKED TO THE MASTER lights up when it
+can see The Master; SET BY THE MASTER flashes when it was just set.
+
+
+PRESETS
+-------
+Factory presets cover the master bus, low end, mud, harshness, cymbals, kick &
+bass, vocals and guitars. SAVE stores your own; they live in
+  macOS:   ~/Library/Application Support/Castle Danger/The Freak/Presets
+  Windows: %APPDATA%\Castle Danger\The Freak\Presets
