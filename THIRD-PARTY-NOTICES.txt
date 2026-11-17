@@ -1,5 +1,5 @@
 ===============================================================================
-  CHOP SHOP - THIRD-PARTY NOTICES
+  THE FREAK - THIRD-PARTY NOTICES
 ===============================================================================
 
 The Freak includes the following third-party software. Each component is used
