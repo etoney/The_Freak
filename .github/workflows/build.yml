@@ -48,7 +48,7 @@ jobs:
             cmake -B build -DCMAKE_BUILD_TYPE=Release
           fi
       - name: Build
-        run: cmake --build build --config Release --target TheFreak_VST3 TheFreak_Standalone
+        run: cmake --build build --config Release --target TheFreak_VST3
       - name: Build AU (macOS)
         if: runner.os == 'macOS'
         run: cmake --build build --config Release --target TheFreak_AU
@@ -57,7 +57,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          for b in build/*_artefacts/Release/VST3/*.vst3 build/*_artefacts/Release/AU/*.component build/*_artefacts/Release/Standalone/*.app; do
+          for b in build/*_artefacts/Release/VST3/*.vst3 build/*_artefacts/Release/AU/*.component; do
             [ -e "$b" ] || continue
             n=$(basename "$b"); n="${n%.*}"
             bin="$b/Contents/MacOS/$n"
@@ -73,15 +73,13 @@ jobs:
           OS=$([ "$RUNNER_OS" = "macOS" ] && echo macOS || echo Windows)
           ZIP="TheFreak-v${VER}-${OS}.zip"
           R=build/TheFreak_artefacts/Release
-          mkdir -p pkg/TheFreak/VST3 pkg/TheFreak/Standalone
+          mkdir -p pkg/TheFreak/VST3
           cp readme.txt controls.txt LICENSE.txt THIRD-PARTY-NOTICES.txt pkg/TheFreak/
           cp -R "$R/VST3/The Freak.vst3" pkg/TheFreak/VST3/
           if [ "$OS" = "macOS" ]; then
             mkdir -p pkg/TheFreak/AU && cp -R "$R/AU/The Freak.component" pkg/TheFreak/AU/
-            cp -R "$R/Standalone/The Freak.app" pkg/TheFreak/Standalone/
             (cd pkg && ditto -c -k --sequesterRsrc --keepParent TheFreak "../$ZIP")
           else
-            cp "$R/Standalone/The Freak.exe" pkg/TheFreak/Standalone/
             (cd pkg && 7z a -tzip -mx=9 "../$ZIP" TheFreak > /dev/null)   # 7z writes forward-slash paths
           fi
           ls -la "$ZIP"
@@ -102,4 +100,3 @@ jobs:
             THIRD-PARTY-NOTICES.txt
             build/TheFreak_artefacts/Release/VST3
             build/TheFreak_artefacts/Release/AU
-            build/TheFreak_artefacts/Release/Standalone
