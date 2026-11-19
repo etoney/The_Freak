@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include "Rebel.h"
 #include "PluginEditor.h"
 
 #ifndef JucePlugin_VersionString
@@ -81,6 +82,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FreakProcessor::createLayout
     p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { "output", 1 }, "Output", NormalisableRange<float> (-12.0f, 12.0f, 0.1f), 0.0f, dbAttr));
     p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { "listen", 1 }, "Listen",
                                                         StringArray { "Off", "Band 1", "Band 2", "Band 3", "Band 4", "Band 5", "Band 6" }, 0));
+    p.push_back (cdrebel::makeParam());
     return { p.begin(), p.end() };
 }
 
@@ -169,7 +171,7 @@ void FreakProcessor::resetToDefaults()
 {
     for (auto* p : getParameters())
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
-            rp->setValueNotifyingHost (rp->getDefaultValue());
+            if (rp->getParameterID() != "rebel") rp->setValueNotifyingHost (rp->getDefaultValue());   // a preset never changes REBEL
     for (int i = 0; i < freak::kBands; ++i) bandNotes.set (i, {});
 }
 

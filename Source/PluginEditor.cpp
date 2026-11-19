@@ -880,6 +880,7 @@ FreakEditor::FreakEditor (FreakProcessor& p)
         if (proc.apvts.getRawParameterValue (FreakProcessor::bandId (b, "on"))->load() > 0.5f) first = b;
     selectBand (first);
     refreshPresetBox();
+    addAndMakeVisible (rebel);
     setSize (980, 650);
     startTimerHz (30);
 }
@@ -964,6 +965,7 @@ void FreakEditor::resized()
     deleteButton.setBounds (894, 70, 70, 24);
     stripeArea = { 0, 110, getWidth(), 10 };
     linkArea = { 300, 84, 180, 14 };
+    rebel.setBounds (linkArea.getX(), linkArea.getCentreY() - 8, 54, 16);
 
     plates.push_back ({ "THE CURVE", { 16, 130, 948, 290 } });
     curve.setBounds (28, 154, 924, 256);
@@ -1209,12 +1211,13 @@ void FreakEditor::paint (juce::Graphics& g)
         auto& lk = proc.getLink();
         const bool linked = lk.masterNearby();
         const bool justSet = lk.getLastNoteTime() > 0 && juce::Time::getMillisecondCounter() - lk.getLastNoteTime() < 6000;
-        auto r = linkArea.toFloat();
-        const auto col = justSet ? pal::signalHot : (linked ? pal::hazard : pal::paintDim.withAlpha (0.35f));
+        const bool rebelOn = lk.isRebel();
+        auto r = linkArea.toFloat().withTrimmedLeft (60);   // REBEL sits first on the line
+        const auto col = rebelOn ? pal::signal : (justSet ? pal::signalHot : (linked ? pal::hazard : pal::paintDim.withAlpha (0.35f)));
         if (linked) { juce::Path lp; lp.addEllipse (r.getX(), r.getCentreY() - 3.5f, 7, 7); juce::DropShadow (col.withAlpha (0.8f), 6, {}).drawForPath (g, lp); }
         g.setColour (col); g.fillEllipse (r.getX(), r.getCentreY() - 3.5f, 7, 7);
         g.setFont (tex::plainBold (9.5f).withExtraKerningFactor (0.1f));
-        g.drawText (justSet ? "SET BY THE MASTER" : (linked ? "LINKED TO THE MASTER" : "LINK"), r.withTrimmedLeft (11).toNearestInt(), juce::Justification::centredLeft);
+        g.drawText (rebelOn ? "HANDS OFF" : (justSet ? "JUST SET" : (linked ? "LINKED" : "LINK")), r.withTrimmedLeft (11).toNearestInt(), juce::Justification::centredLeft);
     }
 }
 

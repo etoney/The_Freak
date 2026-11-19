@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_dsp/juce_dsp.h>
 #include "PluginProcessor.h"
+#include "Rebel.h"
 
 class FreakLookAndFeel : public juce::LookAndFeel_V4
 {
@@ -204,4 +205,5 @@ private:
     float inMeter = 0, outMeter = 0, flicker = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FreakEditor)
+    cdrebel::Button rebel { proc.apvts };   // REBEL: The Master hands off
 };
