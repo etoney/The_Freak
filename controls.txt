@@ -15,7 +15,7 @@ misbehaves:
 band has something in it. So a band set on a quiet verse still behaves in the
 loud chorus, and silence never makes it lift. Zero latency, stereo linked.
 
-Put it first on the master bus (The Freak > Chop Shop > Dominatrix > The Master),
+Put it first on the master bus (The Freak > Cutthroat > Dominatrix > The Master),
 or on any track or bus.
 
 
