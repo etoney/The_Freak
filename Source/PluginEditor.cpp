@@ -316,7 +316,7 @@ void FreakLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& 
     g.setColour (juce::Colours::black.withAlpha (0.7f)); g.drawEllipse (led, 1.0f);
 
     g.setColour (on ? pal::paint : pal::paintDim);
-    g.setFont (tex::stencil (15.0f).withExtraKerningFactor (0.1f));
+    g.setFont (tex::stencil (juce::jmin (15.0f, r.getHeight() * 0.68f)).withExtraKerningFactor (0.1f));
     g.drawText (b.getButtonText(), r.withTrimmedLeft (r.getHeight() * 1.0f).withTrimmedRight (6), juce::Justification::centredLeft);
 }
 
@@ -757,7 +757,7 @@ void BandTabs::paint (juce::Graphics& g)
         g.drawText (juce::String (b + 1), juce::Rectangle<float> (r.getX() + 22, r.getY(), 14, r.getHeight()).toNearestInt(), juce::Justification::centred);
         g.setFont (tex::plainBold (10.0f));
         const int type = (int) v ("type");
-        g.drawText ((type == freak::bell ? "BELL " : (type == freak::lowShelf ? "LO SH " : "HI SH ")) + bandpal::freqText (v ("f")),
+        g.drawText ((v ("k") > 0.5f ? "KEY " : (type == freak::bell ? "BELL " : (type == freak::lowShelf ? "LO SH " : "HI SH "))) + bandpal::freqText (v ("f")),
                     juce::Rectangle<float> (r.getX() + 40, r.getY(), 70, r.getHeight()).toNearestInt(), juce::Justification::centredLeft);
 
         // live move: a little bar centred on zero, cut to the left, lift to the right
@@ -834,6 +834,10 @@ FreakEditor::FreakEditor (FreakProcessor& p)
     typeSel.onChange = [this] { tabs.repaint(); repaint (bandTitleArea); };
     addAndMakeVisible (onButton);
     addAndMakeVisible (listenButton);
+    addAndMakeVisible (keyButton);
+    keyButton.setTooltip ("KEY: this band listens to the SIDECHAIN and moves by DEPTH while the sidechain plays in this range. "
+                          "Put it on a guitar with the vocal on the sidechain and the guitar makes room for the vocal only while it sings. "
+                          "THRESHOLD: how far under its normal level the key may drop and still count as playing.");
     listenButton.setName ("listen");
     listenButton.setTooltip ("Hear only what this band is listening to, to find the problem. Turn it off before you bounce!");
     listenButton.onClick = [this]
@@ -945,6 +949,8 @@ void FreakEditor::refreshBandPlate()
     typeSel.bind (*proc.apvts.getParameter (FreakProcessor::bandId (selected, "type")));
     onAtt.reset();
     onAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, FreakProcessor::bandId (selected, "on"), onButton);
+    keyAtt.reset();
+    keyAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, FreakProcessor::bandId (selected, "k"), keyButton);
     listenButton.setToggleState ((int) proc.apvts.getRawParameterValue ("listen")->load() == selected + 1, juce::dontSendNotification);
     noteLabel.setText (proc.bandNotes[selected], juce::dontSendNotification);
     repaint (bandTitleArea);
@@ -978,6 +984,7 @@ void FreakEditor::resized()
     onButton.setBounds (242, 456, 78, 30);
     typeSel.setBounds (328, 455, 280, 32);
     listenButton.setBounds (616, 456, 120, 30);
+    keyButton.setBounds (598, 432, 138, 20);
     const int kx = 238, kw = 100, ky = 492, kh = 118;
     placeKnob (*freqKnob,  { kx,          ky, kw, kh });
     placeKnob (*qKnob,     { kx + kw,     ky, kw, kh });

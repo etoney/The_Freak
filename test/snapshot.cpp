@@ -25,10 +25,12 @@ static void setP (FreakProcessor& p, const juce::String& id, float v)
 // Generates a test signal through the real processBlock. levelFn(t) gives the amplitude of tone A at time t;
 // tone B (optional) is steady. Returns the left channel.
 struct Render { std::vector<float> in, out; double sr; };
-static Render render (FreakProcessor& p, double seconds, float fA, std::function<float (double)> ampA, float fB = 0, float ampB = 0, double sr = 48000.0)
+// key(t): what goes into the sidechain at time t (none: silence)
+static Render render (FreakProcessor& p, double seconds, float fA, std::function<float (double)> ampA, float fB = 0, float ampB = 0, double sr = 48000.0,
+                      std::function<float (double)> key = {})
 {
     p.prepareToPlay (sr, 512);
-    juce::AudioBuffer<float> buf (2, 512);
+    juce::AudioBuffer<float> buf (juce::jmax (2, p.getTotalNumInputChannels(), p.getTotalNumOutputChannels()), 512);
     juce::MidiBuffer midi;
     Render r; r.sr = sr;
     const int total = (int) (seconds * sr);
@@ -42,6 +44,8 @@ static Render render (FreakProcessor& p, double seconds, float fA, std::function
             phA += juce::MathConstants<double>::twoPi * fA / sr;
             phB += juce::MathConstants<double>::twoPi * fB / sr;
             buf.setSample (0, i, s); buf.setSample (1, i, s);
+            const float k = key ? key (t) : 0.0f;
+            for (int c = 2; c < buf.getNumChannels(); ++c) buf.setSample (c, i, k);
             r.in.push_back (s);
         }
         p.processBlock (buf, midi);
@@ -142,12 +146,30 @@ int main (int argc, char** argv)
         check (lstHi < -30.0 && std::abs (lstLo) < 1.5, "LISTEN solos the band (3 kHz " + fmt (lstHi) + " dB, 60 Hz " + fmt (lstLo) + " dB)");
         setP (p, "listen", 0);
 
+        // KEY: a guitar (steady 3 kHz) keyed by a vocal (3 kHz phrases, 1.5 s on / 1.5 s off). The guitar
+        // dips only while the vocal sings, and keeps its full level between the lines.
+        {
+            FreakProcessor k;
+            check (k.getBusCount (true) == 2 && k.getTotalNumInputChannels() == 4, "a sidechain input for the KEY");
+            setP (k, "b4on", 1); setP (k, "b4f", 3000); setP (k, "b4q", 1.4f); setP (k, "b4d", -6); setP (k, "b4t", 10); setP (k, "b4k", 1);
+            auto vocal = [] (double t) { return std::fmod (t, 3.0) < 1.5 ? 0.2f * (float) std::sin (juce::MathConstants<double>::twoPi * 3000.0 * t) : 0.0f; };
+            auto kr = render (k, 9.0, 3000.0f, [] (double) { return 0.1f; }, 0, 0, 48000.0, vocal);
+            const double sing = gainAt (kr, 3000, 6.4, 7.4), gap = gainAt (kr, 3000, 8.2, 8.9);
+            check (sing < -4.5 && sing > -7.0 && gap > -1.0, "KEY: the guitar dips while the vocal sings (" + fmt (sing) + " dB) and lets go within about half a second after the line (" + fmt (gap) + " dB)");
+            check (k.keyArriving() && k.getEngine().keySeconds() > 3.0, "KEY: it knows the sidechain is playing");
+            auto none = render (k, 4.0, 3000.0f, [] (double) { return 0.1f; });
+            check (std::abs (gainAt (none, 3000, 2.0, 4.0)) < 0.5 && ! k.keyArriving(), "KEY with nothing on the sidechain: no move");
+            setP (k, "b4k", 0);
+            auto self = render (k, 4.0, 3000.0f, [] (double) { return 0.1f; }, 0, 0, 48000.0, vocal);
+            check (std::abs (gainAt (self, 3000, 2.0, 4.0)) < 0.7, "KEY off: the band listens to its own (steady) signal again and leaves it alone");
+        }
+
         // abuse: every band on, random sweeps of everything, loud noise
         {
             juce::Random rnd (7);
             for (int b = 0; b < freak::kBands; ++b) setP (p, FreakProcessor::bandId (b, "on"), 1);
             p.prepareToPlay (44100.0, 256);
-            juce::AudioBuffer<float> buf (2, 256);
+            juce::AudioBuffer<float> buf (4, 256);
             juce::MidiBuffer midi;
             bool finite = true; float peakOut = 0;
             for (int blk = 0; blk < 2000; ++blk)
@@ -185,7 +207,7 @@ int main (int argc, char** argv)
 
         bool idsOk = true;
         for (auto& id : FreakProcessor::linkIds()) idsOk &= p.apvts.getParameter (id) != nullptr;
-        check (idsOk && FreakProcessor::linkIds().size() == 45, "link exposes all " + juce::String (FreakProcessor::linkIds().size()) + " band + global controls");
+        check (idsOk && FreakProcessor::linkIds().size() == 51, "link exposes all " + juce::String (FreakProcessor::linkIds().size()) + " band + global controls");
 
         p.setCurrentProgram (1);
         setP (p, "b2g", 3.3f);
@@ -215,7 +237,7 @@ int main (int argc, char** argv)
         p.bandNotes.set (4, "Harsh 3.8 kHz: jumps 7 dB in the loud parts");
         // feed some music-ish noise so the spectrum and the meters have something to show
         p.prepareToPlay (48000.0, 512);
-        juce::AudioBuffer<float> buf (2, 512);
+        juce::AudioBuffer<float> buf (4, 512);
         juce::MidiBuffer midi;
         juce::Random rnd (3);
         float lp = 0, ph = 0;
@@ -233,6 +255,7 @@ int main (int argc, char** argv)
         }
         std::unique_ptr<juce::AudioProcessorEditor> ed (p.createEditor());
         auto* fe = dynamic_cast<FreakEditor*> (ed.get());
+        setP (p, "b5k", 1);   // band 5 keyed by the sidechain, as The Master sets it on a guitar under the vocal
         fe->selectBand (4);
         for (int i = 0; i < 12; ++i) fe->pumpForSnapshot();
         const auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);

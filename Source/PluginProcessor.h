@@ -40,6 +40,9 @@ public:
     freak::Params currentParams() const;
 
     freak::Engine& getEngine() { return engine; }
+    bool keyArriving() const { return engine.keyActive(); }
+    juce::String getTrackName() const { const juce::ScopedLock sl (nameLock); return trackName; }
+    void updateTrackProperties (const TrackProperties& props) override { const juce::ScopedLock sl (nameLock); trackName = props.name.value_or (juce::String()); }
 
     // output samples (mono) for the editor's spectrum
     juce::AbstractFifo specFifo { 8192 };
@@ -65,6 +68,8 @@ private:
     std::unique_ptr<Link> link;
     void resetToDefaults();
     freak::Engine engine;
+    juce::CriticalSection nameLock;
+    juce::String trackName;
     int currentProgram = 0;
     juce::String currentPresetName { "Init (All Bands Off)" };
 

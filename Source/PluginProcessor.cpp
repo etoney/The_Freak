@@ -18,14 +18,15 @@ juce::StringArray FreakProcessor::linkIds()
 {
     juce::StringArray ids;
     for (int b = 0; b < freak::kBands; ++b)
-        for (auto* w : { "on", "type", "f", "q", "g", "d", "t" }) ids.add (bandId (b, w));
+        for (auto* w : { "on", "type", "f", "q", "g", "d", "t", "k" }) ids.add (bandId (b, w));
     ids.addArray ({ "amount", "speed", "output" });
     return ids;
 }
 
 FreakProcessor::FreakProcessor()
     : AudioProcessor (BusesProperties().withInput ("Input", juce::AudioChannelSet::stereo(), true)
-                                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+                                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
+                                       .withInput ("Sidechain (Key)", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "TheFreak", createLayout())
 {
     link = std::make_unique<Link> ("freak", "The Freak", JucePlugin_VersionString, apvts, linkIds());
@@ -44,6 +45,9 @@ FreakProcessor::FreakProcessor()
         juce::Array<juce::var> dyn;
         for (auto& d : engine.dynDb) dyn.add ((double) d.load());
         o->setProperty ("dynDb", dyn);
+        o->setProperty ("track", getTrackName());
+        o->setProperty ("sidechain", engine.keyActive());
+        o->setProperty ("keySeconds", engine.keySeconds());
         return juce::var (o);
     };
 }
@@ -76,6 +80,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FreakProcessor::createLayout
         p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { bandId (b, "g"), 1 }, n + "Gain", NormalisableRange<float> (-12.0f, 12.0f, 0.1f), 0.0f, dbAttr));
         p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { bandId (b, "d"), 1 }, n + "Depth", NormalisableRange<float> (-18.0f, 12.0f, 0.1f), -6.0f, dbAttr));
         p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { bandId (b, "t"), 1 }, n + "Threshold", NormalisableRange<float> (0.0f, 18.0f, 0.1f), 4.0f, dbAttr));
+        p.push_back (std::make_unique<AudioParameterBool> (ParameterID { bandId (b, "k"), 1 }, n + "Key", false));
     }
     p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { "amount", 1 }, "Amount", NormalisableRange<float> (0.0f, 200.0f, 0.1f), 100.0f, pctAttr));
     p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { "speed", 1 }, "Speed", NormalisableRange<float> (0.0f, 100.0f, 0.1f), 50.0f, pctAttr));
@@ -100,6 +105,7 @@ freak::Params FreakProcessor::currentParams() const
         bp.gainDb = v (bandId (b, "g"));
         bp.depthDb = v (bandId (b, "d"));
         bp.thrDb = v (bandId (b, "t"));
+        bp.key = v (bandId (b, "k")) > 0.5f;
     }
     p.amount = v ("amount") * 0.01f;
     p.speed = v ("speed") * 0.01f;
@@ -113,7 +119,13 @@ bool FreakProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
     const auto out = layouts.getMainOutputChannelSet();
     if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo()) return false;
     const auto in = layouts.getMainInputChannelSet();
-    return in == out || (in == juce::AudioChannelSet::mono() && out == juce::AudioChannelSet::stereo());
+    if (! (in == out || (in == juce::AudioChannelSet::mono() && out == juce::AudioChannelSet::stereo()))) return false;
+    if (layouts.inputBuses.size() > 1)
+    {
+        const auto sc = layouts.getChannelSet (true, 1);
+        if (! sc.isDisabled() && sc != juce::AudioChannelSet::mono() && sc != juce::AudioChannelSet::stereo()) return false;
+    }
+    return true;
 }
 
 void FreakProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -127,17 +139,27 @@ void FreakProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
 {
     juce::ScopedNoDenormals noDenormals;
     const int n = buffer.getNumSamples();
-    const int inCh = getTotalNumInputChannels();
-    const int outCh = juce::jmin (2, buffer.getNumChannels());
+    auto mainIn = getBusBuffer (buffer, true, 0);
+    auto mainOut = getBusBuffer (buffer, false, 0);
+    const int outCh = juce::jmin (2, mainOut.getNumChannels());
     if (outCh <= 0) return;
-    if (inCh == 1 && outCh > 1) buffer.copyFrom (1, 0, buffer, 0, 0, n); // mono in -> stereo out
+    // copy the sidechain (key) first: its channels can share the buffer with the main output
+    juce::AudioBuffer<float> side;
+    int sideCh = 0;
+    if (getBusCount (true) > 1 && getBus (true, 1) != nullptr && getBus (true, 1)->isEnabled() && buffer.getNumChannels() >= getTotalNumInputChannels())
+    {
+        auto sc = getBusBuffer (buffer, true, 1);
+        sideCh = juce::jmin (2, sc.getNumChannels());
+        if (sideCh > 0) { side.setSize (sideCh, n, false, false, true); for (int c = 0; c < sideCh; ++c) side.copyFrom (c, 0, sc, c, 0, n); }
+    }
+    if (mainIn.getNumChannels() == 1 && outCh > 1) mainOut.copyFrom (1, 0, mainOut, 0, 0, n); // mono in -> stereo out
 
     double inPow = 0;
-    for (int c = 0; c < outCh; ++c) { auto* d = buffer.getReadPointer (c); for (int i = 0; i < n; ++i) inPow += (double) d[i] * d[i]; }
+    for (int c = 0; c < outCh; ++c) { auto* d = mainOut.getReadPointer (c); for (int i = 0; i < n; ++i) inPow += (double) d[i] * d[i]; }
     engine.setParams (currentParams());
-    engine.process (buffer.getArrayOfWritePointers(), outCh, n);
+    engine.process (mainOut.getArrayOfWritePointers(), outCh, n, sideCh > 0 ? side.getArrayOfReadPointers() : nullptr, sideCh);
     double outPow = 0;
-    for (int c = 0; c < outCh; ++c) { auto* d = buffer.getReadPointer (c); for (int i = 0; i < n; ++i) outPow += (double) d[i] * d[i]; }
+    for (int c = 0; c < outCh; ++c) { auto* d = mainOut.getReadPointer (c); for (int i = 0; i < n; ++i) outPow += (double) d[i] * d[i]; }
     link->env.addPowers (inPow / juce::jmax (1, outCh * n), outPow / juce::jmax (1, outCh * n), n);
 
     // spectrum feed (drops samples if the editor isn't reading)
@@ -148,15 +170,15 @@ void FreakProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
         {
             for (int i = 0; i < count; ++i)
             {
-                float s = buffer.getSample (0, start + i);
-                if (outCh > 1) s = 0.5f * (s + buffer.getSample (1, start + i));
+                float s = mainOut.getSample (0, start + i);
+                if (outCh > 1) s = 0.5f * (s + mainOut.getSample (1, start + i));
                 specBuf[(size_t) (dst + i)] = s;
             }
         };
         put (0, w.blockSize1, w.startIndex1);
         put (w.blockSize1, w.blockSize2, w.startIndex2);
     }
-    for (int ch = outCh; ch < buffer.getNumChannels(); ++ch) buffer.clear (ch, 0, n);
+    for (int ch = outCh; ch < mainOut.getNumChannels(); ++ch) mainOut.clear (ch, 0, n);
 }
 
 //==============================================================================

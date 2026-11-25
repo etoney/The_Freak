@@ -16,7 +16,8 @@ band has something in it. So a band set on a quiet verse still behaves in the
 loud chorus, and silence never makes it lift. Zero latency, stereo linked.
 
 Put it first on the master bus (The Freak > Cutthroat > Dominatrix > The Master),
-or on any track or bus.
+or on any track or bus. On a track or bus that hides the lead vocal, The Master
+sets it up to UNMASK the vocal: KEY bands, with the vocal on the sidechain.
 
 
 THE CURVE
@@ -47,9 +48,21 @@ BAND CONTROLS (selected band)
                   A low shelf moves everything below FREQ and listens to the
                   lows; a high shelf moves everything above and listens to
                   the highs.
+  KEY: SIDECHAIN  the band listens to the SIDECHAIN input instead of its own
+                  signal, and moves by DEPTH while the sidechain plays in its
+                  range. That's unmasking: on a guitar (or a guitar bus) with
+                  the lead vocal on the sidechain, the guitar makes room in
+                  the vocal's range only while it sings, and keeps its full
+                  tone between the lines. With KEY on, THRESHOLD is how far
+                  under its normal level the sidechain may drop and still
+                  count as playing; the band lets go about half a second
+                  after the sidechain stops. Nothing on the sidechain: the
+                  band doesn't move. In the BANDS list a KEY band reads
+                  "KEY 2.83k". In Studio Pro: the sidechain button in The
+                  Freak's window, then pick the vocal track.
   LISTEN ........ hear only what this band is listening to, to find the
-                  problem. Turn it off before you bounce. (Never saved in a
-                  preset.)
+                  problem (for a KEY band: the sidechain). Turn it off before
+                  you bounce. (Never saved in a preset.)
   FREQ .......... 20 Hz - 20 kHz
   WIDTH (Q) ..... 0.3 - 8. Higher = narrower. For a shelf it sets the slope.
   GAIN .......... -12 to +12 dB, always applied

@@ -5,6 +5,11 @@
 // more than THRESHOLD dB above that average, a positive DEPTH lifts when it sinks more than THRESHOLD below.
 // Because the threshold is relative, a band set on a quiet intro still behaves in the loud chorus.
 // Zero latency, stereo linked (detector on mid).
+//
+// KEY (per band): the band listens to the SIDECHAIN instead of its own signal, and moves by DEPTH while the
+// key is playing in that range. That's unmasking: a guitar keyed by the vocal makes room in the vocal's
+// range only while the singer sings, and keeps its full tone between the lines. With KEY on, THRESHOLD is how
+// far under its normal level the key may drop and still count as playing.
 #include <juce_core/juce_core.h>
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <array>
@@ -22,6 +27,7 @@ struct Band
     bool on = false;
     int type = bell;
     float freq = 1000.0f, q = 1.0f, gainDb = 0.0f, depthDb = -6.0f, thrDb = 4.0f;
+    bool key = false;        // listen to the sidechain
 };
 
 struct Params
@@ -161,6 +167,15 @@ struct Svf
     void reset() { ic1 = ic2 = 0; }
 };
 
+// KEY: how much of DEPTH to use, from how far the key's band sits under its own normal level (over, dB).
+// Full depth while the key plays at its normal level, fading out over 6 dB once it drops more than THRESHOLD
+// below it, none in silence.
+inline float keyedGain (float overDb, float thrDb, float depthDb)
+{
+    const float presence = juce::jlimit (0.0f, 1.0f, (overDb + thrDb + 6.0f) / 6.0f);
+    return depthDb * presence;
+}
+
 // The rule that turns "how far the band is from its own average" into a gain move.
 // over = band level - band average, in dB. Returns the dynamic gain in dB.
 inline float dynamicGain (float overDb, float thrDb, float depthDb)
@@ -178,7 +193,8 @@ public:
     void prepare (double sampleRate, int)
     {
         fs = sampleRate;
-        for (auto& b : st) { for (auto& f : b.eq) f.reset(); for (auto& f : b.listenF) f.reset(); b.det.reset(); b.env = 0; b.avg = 0; b.age = 0; b.dyn = 0; b.applied = 1e9f; }
+        for (auto& b : st) { for (auto& f : b.eq) f.reset(); for (auto& f : b.listenF) f.reset(); b.det.reset(); b.keyDet.reset(); b.env = 0; b.avg = 0; b.age = 0; b.keyEnv = 0; b.keyAvg = 0; b.keyAge = 0; b.dyn = 0; b.applied = 1e9f; }
+        keySilent = (juce::int64) (10.0 * fs); keyHeard = 0;
         countdown = 0;
         outGain = juce::Decibels::decibelsToGain (p.outputDb);
         avgCoef = std::exp (-1.0 / (3.0 * fs));    // ~3 s "what is normal for this band"
@@ -199,6 +215,7 @@ public:
             {
                 auto& s = st[(size_t) i];
                 s.det.c = makeDetector (b.type, fs, b.freq, b.q);
+                s.keyDet.c = s.det.c;
                 const auto lc = makeDetector (b.type, fs, b.freq, b.q);
                 for (auto& f : s.listenF) f.c = lc;
                 s.applied = 1e9f;   // force an EQ coefficient update
@@ -213,8 +230,8 @@ public:
         relCoef = std::exp (-1.0 / (relMs * 0.001 * fs));
     }
 
-    // in-place, ch = 1 or 2
-    void process (float* const* data, int numCh, int n)
+    // in-place, ch = 1 or 2. side: the sidechain (key), or nullptr
+    void process (float* const* data, int numCh, int n, const float* const* side = nullptr, int sideCh = 0)
     {
         const float targetOut = juce::Decibels::decibelsToGain (p.outputDb);
         float inPk = 0, outPk = 0;
@@ -227,12 +244,27 @@ public:
             float x[2] = { data[0][i], numCh > 1 ? data[1][i] : data[0][i] };
             inPk = std::max ({ inPk, std::abs (x[0]), std::abs (x[1]) });
             const float mid = 0.5f * (x[0] + x[1]);
+            float key = 0.0f;
+            if (side != nullptr && sideCh > 0) key = sideCh > 1 ? 0.5f * (side[0][i] + side[1][i]) : side[0][i];
+            if (std::abs (key) > 1e-4f) { keySilent = 0; ++keyHeard; } else ++keySilent;
 
             for (int b = 0; b < kBands; ++b)
             {
                 auto& s = st[(size_t) b];
                 const auto& bp = p.bands[(size_t) b];
-                if (! bp.on && listen != b + 1) { s.env = s.avg = 0; s.age = 0; continue; }
+                if (! bp.on && listen != b + 1) { s.env = s.avg = 0; s.age = 0; s.keyEnv = s.keyAvg = 0; s.keyAge = 0; continue; }
+                if (bp.key)
+                {
+                    const float kd = s.keyDet.process (key);
+                    const double kp = (double) kd * kd;
+                    s.keyEnv = kp > s.keyEnv ? kp + atkCoef * (s.keyEnv - kp) : kp + relCoef * (s.keyEnv - kp);
+                    if (s.keyEnv > 1e-8)   // the key's normal level in this band: learned only while it plays
+                    {
+                        const double eDb = 10.0 * std::log10 (s.keyEnv);
+                        if (s.keyAge < warmSamples) { ++s.keyAge; s.keyAvg = s.keyAge == 1 ? eDb : eDb + fastCoef * (s.keyAvg - eDb); }
+                        else s.keyAvg = eDb + avgCoef * (s.keyAvg - eDb);
+                    }
+                }
                 const float d = s.det.process (mid);
                 const double pw = (double) d * d;
                 s.env = pw > s.env ? pw + atkCoef * (s.env - pw) : pw + relCoef * (s.env - pw);
@@ -250,7 +282,10 @@ public:
             if (listen >= 1 && listen <= kBands)
             {
                 auto& s = st[(size_t) listen - 1];
-                for (int c = 0; c < 2; ++c) y[c] = s.listenF[(size_t) c].process (x[c]);
+                if (p.bands[(size_t) listen - 1].key && side != nullptr && sideCh > 0)   // a KEY band: hear what it listens to, the key
+                    for (int c = 0; c < 2; ++c) y[c] = s.listenF[(size_t) c].process (side[juce::jmin (c, sideCh - 1)][i]);
+                else
+                    for (int c = 0; c < 2; ++c) y[c] = s.listenF[(size_t) c].process (x[c]);
             }
             else
             {
@@ -269,6 +304,8 @@ public:
     }
 
     int getLatency() const { return 0; }
+    bool keyActive() const { return keySilent < (juce::int64) (3.0 * fs); }   // something on the sidechain in the last 3 s
+    double keySeconds() const { return (double) keyHeard / fs; }
     double getSampleRate() const { return fs; }
     const Params& getParams() const { return p; }
 
@@ -286,7 +323,15 @@ private:
             const auto& bp = p.bands[(size_t) b];
             if (! bp.on) { s.dyn = 0; dynDb[(size_t) b].store (0.0f); overDb[(size_t) b].store (-100.0f); continue; }
             float target = 0.0f, over = -100.0f;
-            if (s.age >= warmSamples / 4)   // band has had content long enough to know what's normal
+            if (bp.key)
+            {
+                if (s.keyAge >= warmSamples / 4 && s.keyEnv > 1e-8)
+                {
+                    over = (float) (10.0 * std::log10 (s.keyEnv) - s.keyAvg);
+                    target = keyedGain (over, bp.thrDb, bp.depthDb * p.amount);
+                }
+            }
+            else if (s.age >= warmSamples / 4)   // band has had content long enough to know what's normal
             {
                 over = (float) (10.0 * std::log10 (std::max (1e-20, s.env)) - s.avg);
                 target = dynamicGain (over, bp.thrDb, bp.depthDb * p.amount);
@@ -309,9 +354,10 @@ private:
     {
         std::array<Svf, 2> eq;
         std::array<Biquad, 2> listenF;
-        Biquad det;
+        Biquad det, keyDet;
         double env = 0, avg = 0;   // avg: the band's normal level, dB (learned only while it has content)
-        int age = 0;
+        double keyEnv = 0, keyAvg = 0;
+        int age = 0, keyAge = 0;
         float dyn = 0, applied = 1e9f;
     };
     std::array<State, kBands> st;
@@ -321,5 +367,6 @@ private:
     float outGain = 1.0f;
     int countdown = 0;
     bool primed = false;
+    juce::int64 keySilent = 0, keyHeard = 0;
 };
 } // namespace freak

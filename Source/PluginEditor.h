@@ -181,8 +181,8 @@ private:
     Knob *freqKnob = nullptr, *qKnob = nullptr, *gainKnob = nullptr, *depthKnob = nullptr, *thrKnob = nullptr;
     Knob *amountKnob = nullptr, *speedKnob = nullptr, *outKnob = nullptr;
     Selector typeSel { { "BELL", "LOW SHELF", "HIGH SHELF" } };
-    juce::ToggleButton onButton { "ON" }, listenButton { "LISTEN" };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAtt;
+    juce::ToggleButton onButton { "ON" }, listenButton { "LISTEN" }, keyButton { "KEY: SIDECHAIN" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAtt, keyAtt;
     FreakEye eye;
     CurveView curve;
     BandTabs tabs;
